@@ -1,3 +1,52 @@
+# Python cache/build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments / local tooling
+.venv/
+venv/
+.env
+.env.*
+.vscode/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.tmp
+*.log
+
+# Local debug files
+live_console_err.txt
+
+# Dataset and generated media (do not push)
+data/raw/
+data/processed/
+
+# If models are large and downloaded locally, keep ignored
+# (remove this if you want to version these model files)
+data/models/
+
+# Large media / generated outputs
+*.wav
+*.mp3
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.jsonl
+
+# Optional: Whisper/faster-whisper local cache (outside repo usually)
+.faster-whisper/
+.cache/
+
 # Dependencies
 node_modules
 .pnpm-store
@@ -5,18 +54,15 @@ node_modules
 # Next.js build output
 .next
 out
-dist
 .turbo
 
 # Production build artifacts
 build
 
 # Environment variables
-.env
 .env*.local
 
 # Logs
-*.log
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
@@ -30,6 +76,4 @@ coverage
 
 # Tooling / editor
 .vercel
-.vscode
 .idea
-.DS_Store
