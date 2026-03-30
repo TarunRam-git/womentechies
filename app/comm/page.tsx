@@ -2,28 +2,69 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import io, { Socket } from "socket.io-client";
 
 type Message = { from: string; text: string; ts: string };
+type MotionFrame = {
+  pose: number[][];
+  left_hand: number[][];
+  right_hand: number[][];
+};
+type MotionPayload = {
+  fps: number;
+  text: string;
+  total_frames: number;
+  frames: MotionFrame[];
+};
+
+const POSE_CONNECTIONS: Array<[number, number]> = [
+  [0, 1],
+  [0, 2], [2, 4],
+  [1, 3], [3, 5],
+  [0, 6], [1, 7],
+  [6, 7]
+];
+const HAND_CONNECTIONS: Array<[number, number]> = [
+  [0, 1], [1, 2], [2, 3], [3, 4],
+  [0, 5], [5, 6], [6, 7], [7, 8],
+  [5, 9], [9, 10], [10, 11], [11, 12],
+  [9, 13], [13, 14], [14, 15], [15, 16],
+  [13, 17], [17, 18], [18, 19], [19, 20],
+  [0, 17]
+];
 
 export default function CommPage() {
+  return (
+    <Suspense fallback={<main className="comm-surface"><div className="page comm-page">Loading...</div></main>}>
+      <CommPageContent />
+    </Suspense>
+  );
+}
+
+function CommPageContent() {
   const params = useSearchParams();
-  const room = params.get("room") || "room-001";
-  const role = params.get("role") || "sign";
-  const name = params.get("name") || (role === "speech" ? "Speech User" : "Sign User");
+  const room = params?.get("room") || "room-001";
+  const role = params?.get("role") || "sign";
+  const name = params?.get("name") || (role === "speech" ? "Speech User" : "Sign User");
   const [messages, setMessages] = useState<Message[]>([
     { from: "System", text: "Welcome to Sign-Sync!", ts: new Date().toLocaleTimeString() }
   ]);
   const [input, setInput] = useState("");
   const socketRef = useRef<Socket | null>(null);
-  const [avatarCue, setAvatarCue] = useState<number>(Date.now());
+  const [direction1Running, setDirection1Running] = useState(false);
+  const [direction1State, setDirection1State] = useState<any>(null);
+  const [direction1Busy, setDirection1Busy] = useState(false);
+  const [direction1Error, setDirection1Error] = useState("");
+  const [avatarMotion, setAvatarMotion] = useState<MotionPayload | null>(null);
+  const [avatarLoading, setAvatarLoading] = useState(false);
+  const [avatarError, setAvatarError] = useState("");
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const rafRef = useRef<number>();
+  const rafRef = useRef<number | null>(null);
   const [micLevel, setMicLevel] = useState(0);
   const [mediaError, setMediaError] = useState("");
   const [camOn, setCamOn] = useState(true);
@@ -38,13 +79,14 @@ export default function CommPage() {
 
     socket.on("new-message", (payload: { from: string; text: string; ts: number }) => {
       setMessages((prev) => [...prev, { from: payload.from, text: payload.text, ts: new Date(payload.ts).toLocaleTimeString() }]);
-      setAvatarCue(payload.ts);
     });
     socket.on("system", (msg: { text: string }) => {
       setMessages((prev) => [...prev, { from: "System", text: msg.text, ts: new Date().toLocaleTimeString() }]);
     });
 
-    return () => socket.disconnect();
+    return () => {
+      socket.disconnect();
+    };
   }, [room, name, role]);
 
   const stopMedia = () => {
@@ -120,6 +162,107 @@ export default function CommPage() {
     refreshMedia(camOn, micOn);
     return () => stopMedia();
   }, [camOn, micOn]);
+
+  useEffect(() => {
+    if (role !== "sign") return;
+    let active = true;
+
+    const tick = async () => {
+      try {
+        const res = await fetch("/api/direction1/status");
+        const data = await res.json();
+        if (!active) return;
+        setDirection1Running(Boolean(data.running));
+        setDirection1State(data.state || null);
+        if (data.running) {
+          setDirection1Error("");
+        }
+        if (!data.running && data.lastExit && data.lastExit.code !== null && data.lastExit.code !== 0) {
+          const tail = String(data.logTail || "").trim();
+          setDirection1Error(tail ? tail : `Direction-1 exited with code ${data.lastExit.code}`);
+        } else if (!data.running && data.lastExit && data.lastExit.signal) {
+          setDirection1Error("");
+        }
+      } catch {
+      }
+    };
+
+    tick();
+    const id = setInterval(tick, 1200);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [role]);
+
+  useEffect(() => {
+    if (role !== "speech") return;
+    const latest = [...messages].reverse().find((m) => m.from.toLowerCase() !== "system");
+    if (!latest || !latest.text.trim()) return;
+
+    let cancelled = false;
+    const run = async () => {
+      try {
+        setAvatarLoading(true);
+        setAvatarError("");
+        const res = await fetch("/api/avatar/render", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: latest.text })
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok || !data?.ok) {
+          setAvatarError(data?.error || "Avatar render failed");
+          return;
+        }
+        setAvatarMotion(data.motion || null);
+      } catch (err: any) {
+        if (!cancelled) setAvatarError(err?.message || "Avatar render failed");
+      } finally {
+        if (!cancelled) setAvatarLoading(false);
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [role, messages]);
+
+  const startDirection1 = async () => {
+    try {
+      setDirection1Busy(true);
+      setDirection1Error("");
+      if (!camOn) {
+        setCamOn(true);
+      }
+      const res = await fetch("/api/direction1/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      });
+      const data = await res.json();
+      setDirection1Running(Boolean(data.running));
+      if (!data.running && data.error) {
+        setDirection1Error(String(data.error));
+      }
+    } finally {
+      setDirection1Busy(false);
+    }
+  };
+
+  const stopDirection1 = async () => {
+    try {
+      setDirection1Busy(true);
+      const res = await fetch("/api/direction1/stop", { method: "POST" });
+      const data = await res.json();
+      setDirection1Running(Boolean(data.running));
+      setDirection1Error("");
+    } finally {
+      setDirection1Busy(false);
+    }
+  };
 
   const rightTitle = useMemo(() => (role === "speech" ? "Live Sign View" : "Incoming Speech"), [role]);
 
@@ -253,6 +396,21 @@ export default function CommPage() {
                   icon={micOn ? "🎙️" : "🔇"}
                 />
               </div>
+              {role === "sign" && direction1Running && !camOn && (
+                <div
+                  className="pill"
+                  style={{
+                    position: "absolute",
+                    top: 12,
+                    right: 12,
+                    background: "rgba(191,219,254,0.25)",
+                    borderColor: "rgba(96,165,250,0.6)",
+                    color: "#dbeafe"
+                  }}
+                >
+                  Direction-1 running (turn Cam on for frontend preview)
+                </div>
+              )}
               {mediaError && (
                 <div
                   className="pill"
@@ -294,7 +452,23 @@ export default function CommPage() {
                   </div>
                 </div>
               </div>
-              <StatusTile icon="🤟" label="Signing: Message" />
+              {role === "sign" ? (
+                <Direction1Panel
+                  running={direction1Running}
+                  busy={direction1Busy}
+                  state={direction1State}
+                  error={direction1Error}
+                  onStart={startDirection1}
+                  onStop={stopDirection1}
+                  onSend={() => {
+                    const sentence = String(direction1State?.sentence || "").trim();
+                    if (!sentence) return;
+                    socketRef.current?.emit("send-message", { room, text: sentence, name });
+                  }}
+                />
+              ) : (
+                <AvatarPanel motion={avatarMotion} loading={avatarLoading} error={avatarError} />
+              )}
               <MessageList messages={messages} />
             </div>
           </Panel>
@@ -331,6 +505,168 @@ export default function CommPage() {
       </div>
     </main>
   );
+}
+
+function Direction1Panel({
+  running,
+  busy,
+  state,
+  error,
+  onStart,
+  onStop,
+  onSend
+}: {
+  running: boolean;
+  busy: boolean;
+  state: any;
+  error: string;
+  onStart: () => void;
+  onStop: () => void;
+  onSend: () => void;
+}) {
+  const sentence = String(state?.sentence || "").trim();
+  return (
+    <div
+      style={{
+        display: "grid",
+        gap: 10,
+        padding: 14,
+        borderRadius: 16,
+        border: "1px solid var(--border)",
+        background: "#fefcf8",
+        boxShadow: "0 10px 20px rgba(0,0,0,0.06)"
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontWeight: 700, color: "#312118" }}>Direction-1 Live Recognition</div>
+        <div className="pill" style={{ background: running ? "#dcfce7" : "#fee2e2" }}>
+          {running ? "Running" : "Stopped"}
+        </div>
+      </div>
+      <div className="muted" style={{ fontSize: 14, color: "#7a6856" }}>
+        Uses Python MediaPipe realtime recognizer. Browser cam is turned off while Direction-1 runs so webcam is free.
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="btn btn-primary" disabled={busy || running} onClick={onStart}>Start</button>
+        <button className="btn btn-secondary" disabled={busy || !running} onClick={onStop}>Stop</button>
+        <button className="btn btn-primary" disabled={!sentence} onClick={onSend}>Send Sentence</button>
+      </div>
+      <div style={{ fontSize: 14, color: "#6b5b49" }}>
+        <strong>Latest:</strong> {state?.text || "-"} · conf {Number(state?.confidence || 0).toFixed(2)}
+      </div>
+      <div style={{ fontSize: 13, color: "#7a6856" }}>
+        <strong>Model:</strong> {state?.model || "models/dynamic_lstm_10class_combined.onnx"}
+      </div>
+      {!!error && (
+        <div style={{ fontSize: 13, color: "#7f1d1d", background: "#fee2e2", border: "1px solid #fca5a5", padding: "10px 12px", borderRadius: 12, whiteSpace: "pre-wrap" }}>
+          {error}
+        </div>
+      )}
+      <div style={{ fontSize: 14, color: "#2f2416", background: "#f0e3d5", padding: "10px 12px", borderRadius: 12 }}>
+        {sentence || "No sentence yet"}
+      </div>
+    </div>
+  );
+}
+
+function AvatarPanel({ motion, loading, error }: { motion: MotionPayload | null; loading: boolean; error: string }) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gap: 10,
+        padding: 14,
+        borderRadius: 16,
+        border: "1px solid var(--border)",
+        background: "#fefcf8",
+        boxShadow: "0 10px 20px rgba(0,0,0,0.06)"
+      }}
+    >
+      <div style={{ fontWeight: 700, color: "#312118" }}>Avatar Playback</div>
+      <div className="muted" style={{ fontSize: 14, color: "#7a6856" }}>
+        Uses the improved avatar pipeline and renders landmark motion directly in this page.
+      </div>
+      {loading && <div className="pill">Rendering avatar...</div>}
+      {error && <div className="pill" style={{ background: "#fee2e2", borderColor: "#fca5a5" }}>{error}</div>}
+      <AvatarMotionCanvas motion={motion} />
+    </div>
+  );
+}
+
+function AvatarMotionCanvas({ motion }: { motion: MotionPayload | null }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !motion || !motion.frames?.length) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let frameIdx = 0;
+    let raf = 0;
+    let last = performance.now();
+    const fps = Math.max(1, Number(motion.fps || 15));
+    const frameMs = 1000 / fps;
+
+    const toPx = (pt: number[]) => {
+      const x = Math.min(1, Math.max(0, Number(pt?.[0] || 0)));
+      const y = Math.min(1, Math.max(0, Number(pt?.[1] || 0)));
+      return [Math.round(x * canvas.width), Math.round(y * canvas.height)] as const;
+    };
+    const visible = (pt: number[]) => Number(pt?.[3] ?? 1) > 0.05;
+
+    const drawGraph = (pts: number[][], edges: Array<[number, number]>, color: string, radius: number, lineW: number) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lineW;
+      ctx.lineCap = "round";
+      for (const [a, b] of edges) {
+        if (!pts[a] || !pts[b] || !visible(pts[a]) || !visible(pts[b])) continue;
+        const p1 = toPx(pts[a]);
+        const p2 = toPx(pts[b]);
+        ctx.beginPath();
+        ctx.moveTo(p1[0], p1[1]);
+        ctx.lineTo(p2[0], p2[1]);
+        ctx.stroke();
+      }
+      ctx.fillStyle = color;
+      for (const p of pts) {
+        if (!p || !visible(p)) continue;
+        const [x, y] = toPx(p);
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    };
+
+    const paint = (ts: number) => {
+      if (ts - last >= frameMs) {
+        frameIdx = (frameIdx + 1) % motion.frames.length;
+        last = ts;
+      }
+
+      const f = motion.frames[frameIdx];
+      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      grad.addColorStop(0, "#0e1420");
+      grad.addColorStop(1, "#222936");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      drawGraph(f.pose || [], POSE_CONNECTIONS, "#50d2ff", 3, 2);
+      drawGraph(f.left_hand || [], HAND_CONNECTIONS, "#50ff78", 2, 2);
+      drawGraph(f.right_hand || [], HAND_CONNECTIONS, "#ffb446", 2, 2);
+
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.font = "13px sans-serif";
+      ctx.fillText(`Text: ${motion.text || ""}`, 10, canvas.height - 12);
+
+      raf = requestAnimationFrame(paint);
+    };
+
+    raf = requestAnimationFrame(paint);
+    return () => cancelAnimationFrame(raf);
+  }, [motion]);
+
+  return <canvas ref={canvasRef} width={560} height={320} style={{ width: "100%", borderRadius: 12, border: "1px solid var(--border)" }} />;
 }
 
 function TopBar({ room, name, role }: { room: string; name: string; role: string }) {
@@ -378,7 +714,7 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 
 function MessageList({ messages }: { messages: Message[] }) {
   const params = useSearchParams();
-  const selfName = params.get("name") || "";
+  const selfName = params?.get("name") || "";
   const listRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -543,23 +879,27 @@ function ToggleButton({
   active,
   label,
   icon,
-  onClick
+  onClick,
+  disabled = false
 }: {
   active: boolean;
   label: string;
   icon: string;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
       type="button"
+      disabled={disabled}
       className="pill"
       style={{
         borderColor: active ? "var(--cyan)" : "var(--border)",
-        color: active ? "#0c0f16" : "var(--text)",
-        background: active ? "var(--cyan)" : "rgba(255,255,255,0.06)",
-        cursor: "pointer"
+        color: disabled ? "#9ca3af" : active ? "#0c0f16" : "var(--text)",
+        background: disabled ? "rgba(255,255,255,0.05)" : active ? "var(--cyan)" : "rgba(255,255,255,0.06)",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.6 : 1
       }}
     >
       <span style={{ marginRight: 6 }}>{icon}</span>
