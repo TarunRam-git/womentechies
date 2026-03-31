@@ -26,9 +26,12 @@ Thumbs.db
 # Local debug files
 live_console_err.txt
 
-# Dataset and generated media (do not push)
+# Dataset source media (do not push)
 data/raw/
-data/processed/
+
+# Runtime-transient processed outputs (keep ignored)
+data/processed/audio_raw/
+data/processed/logs/
 
 # If models are large and downloaded locally, keep ignored
 # (remove this if you want to version these model files)
@@ -42,6 +45,13 @@ data/models/
 *.mov
 *.mkv
 *.jsonl
+
+# Keep required processed dataset artifacts versioned
+!data/processed/manifests/*.jsonl
+!data/processed/manifests/*.json
+!data/processed/pose/**/*.json
+!data/processed/models/**
+!data/processed/timelines/**/*.json
 
 # Optional: Whisper/faster-whisper local cache (outside repo usually)
 .faster-whisper/

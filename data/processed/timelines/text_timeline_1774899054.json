@@ -1,0 +1,41 @@
+{
+  "engine": "threejs",
+  "interpolation": "linear",
+  "events": [
+    {
+      "gloss": "YOU",
+      "pose_path": "E:\\wt3\\data\\processed\\pose\\YOU\\MVI_9888.json",
+      "start_time": 0.0,
+      "duration": 0.8,
+      "speed": 1.0
+    },
+    {
+      "gloss": "HELLO",
+      "pose_path": "E:\\wt3\\data\\processed\\pose\\HELLO\\MVI_0032.json",
+      "start_time": 0.8,
+      "duration": 0.8,
+      "speed": 1.0
+    },
+    {
+      "gloss": "FS_H",
+      "pose_path": "",
+      "start_time": 1.6,
+      "duration": 0.8,
+      "speed": 1.0
+    },
+    {
+      "gloss": "FS_O",
+      "pose_path": "",
+      "start_time": 2.4000000000000004,
+      "duration": 0.8,
+      "speed": 1.0
+    },
+    {
+      "gloss": "FS_W",
+      "pose_path": "",
+      "start_time": 3.2,
+      "duration": 0.8,
+      "speed": 1.0
+    }
+  ]
+}

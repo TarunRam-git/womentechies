@@ -1,0 +1,20 @@
+{
+  "engine": "threejs",
+  "interpolation": "linear",
+  "events": [
+    {
+      "gloss": "I",
+      "pose_path": "E:\\wt3\\data\\processed\\pose\\I\\MVI_9918.json",
+      "start_time": 0.0,
+      "duration": 0.8,
+      "speed": 1.0
+    },
+    {
+      "gloss": "HELP",
+      "pose_path": "E:\\wt3\\data\\processed\\pose\\PLEASED\\MVI_0116.json",
+      "start_time": 0.8,
+      "duration": 0.8,
+      "speed": 1.0
+    }
+  ]
+}

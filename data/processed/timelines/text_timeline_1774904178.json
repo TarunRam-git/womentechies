@@ -1,0 +1,13 @@
+{
+  "engine": "threejs",
+  "interpolation": "linear",
+  "events": [
+    {
+      "gloss": "GOOD MORNING",
+      "pose_path": "E:\\wt3\\data\\processed\\pose\\GOOD MORNING\\MVI_9970.json",
+      "start_time": 0.0,
+      "duration": 0.8,
+      "speed": 1.0
+    }
+  ]
+}
