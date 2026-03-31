@@ -1,0 +1,6 @@
+{
+  "sequence_length": 30,
+  "feature_dim": 180,
+  "num_classes": 2,
+  "val_accuracy": 0.8928571428571429
+}

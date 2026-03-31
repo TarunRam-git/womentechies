@@ -2,12 +2,20 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 
 export default function JoinPage() {
+  return (
+    <Suspense fallback={<main className="landing"><div className="page join-page">Loading...</div></main>}>
+      <JoinPageContent />
+    </Suspense>
+  );
+}
+
+function JoinPageContent() {
   const router = useRouter();
   const params = useSearchParams();
-  const role = params.get("role") || "sign";
+  const role = params?.get("role") || "sign";
   const [name, setName] = useState("");
   const [room, setRoom] = useState("");
 
