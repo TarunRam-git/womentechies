@@ -1,12 +1,29 @@
-import { spawn } from "child_process";
+import { spawn, execFileSync } from "child_process";
 import fs from "fs";
 import path from "path";
 
 const STATE_FILE = path.join(process.cwd(), "data", "processed", "direction1_live.json");
 const LOG_FILE = path.join(process.cwd(), "data", "processed", "direction1_live.log");
+const PYTHON_CANDIDATES = [
+  { cmd: "py", args: ["-3.12"] },
+  { cmd: "python3", args: [] },
+  { cmd: "python", args: [] }
+];
 
 function isProcAlive(proc) {
   return !!proc && !proc.killed && proc.exitCode === null;
+}
+
+function pickPython() {
+  for (const candidate of PYTHON_CANDIDATES) {
+    try {
+      execFileSync(candidate.cmd, [...candidate.args, "--version"], { windowsHide: true, stdio: "pipe" });
+      return candidate;
+    } catch {
+      // try next
+    }
+  }
+  throw new Error("Python 3.12+ is required for direction-1. Install Python and ensure it is on PATH.");
 }
 
 export default function handler(req, res) {
@@ -34,8 +51,16 @@ export default function handler(req, res) {
     return;
   }
 
+  let python;
+  try {
+    python = pickPython();
+  } catch (err) {
+    res.status(500).json({ ok: false, running: false, error: err.message || "Python runtime unavailable" });
+    return;
+  }
+
   const args = [
-    "-3.12",
+    ...python.args,
     "app.py",
     "--model",
     model,
@@ -61,7 +86,7 @@ export default function handler(req, res) {
   fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
   fs.writeFileSync(LOG_FILE, "", "utf-8");
 
-  const proc = spawn("py", args, {
+  const proc = spawn(python.cmd, args, {
     cwd: process.cwd(),
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true
